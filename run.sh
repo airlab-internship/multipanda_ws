@@ -2,6 +2,7 @@
 # Usage:
 #   ./run.sh                 -> 컨테이너 안 터미널로 진입
 #   ./run.sh <command...>    -> 컨테이너 안에서 명령 실행 (예: ./run.sh ros2 topic list)
+#   ./run.sh '<cmd | cmd>'   -> 따옴표로 감싼 한 문자열은 셸 명령으로 실행 (파이프 등)
 set -e
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="airlab-sim:humble"
@@ -39,6 +40,8 @@ docker exec --user developer "$NAME" bash -c \
 if [ $# -eq 0 ]; then
     docker exec -it --user developer "$NAME" bash
 else
+    # 인자 1개 = 셸 명령 문자열 그대로 (파이프 등), 여러 개 = 각 인자의 따옴표 유지
+    if [ $# -eq 1 ]; then CMD="$1"; else printf -v CMD '%q ' "$@"; fi
     TTY=(-i); [ -t 0 ] && TTY=(-it)
-    docker exec "${TTY[@]}" --user developer "$NAME" bash -ic "cd ~/multipanda_ws && $*"
+    docker exec "${TTY[@]}" --user developer "$NAME" bash -ic "cd ~/multipanda_ws && $CMD"
 fi
