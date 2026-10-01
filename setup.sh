@@ -30,3 +30,5 @@ docker build -t airlab-sim:humble "$WS/docker"
 echo
 echo "완료. 시뮬레이터 실행:"
 echo "  $WS/run.sh ros2 launch franka_bringup franka_sim_with_camera.launch.py"
+echo "Pick & Place 시뮬레이터 (Part B):"
+echo "  $WS/run.sh ros2 launch airlab_pick_place sim.launch.py"

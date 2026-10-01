@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>airlab_pick_place</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="developer@todo.todo">developer</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>airlab_msgs</depend>
+  <depend>moveit_py</depend>
+  <depend>moveit_configs_utils</depend>
+  <depend>moveit_msgs</depend>
+  <depend>mujoco_ros_msgs</depend>
+  <depend>control_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>shape_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_ros</depend>
+  <depend>cv_bridge</depend>
+  <exec_depend>python3-h5py</exec_depend>
+  <exec_depend>franka_bringup</exec_depend>
+  <exec_depend>franka_description</exec_depend>
+  <exec_depend>franka_moveit_config</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

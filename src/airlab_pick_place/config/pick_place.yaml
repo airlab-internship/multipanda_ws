@@ -1,0 +1,33 @@
+# 노드가 시작할 때 자동으로 읽는 기본값. 수정 후 colcon build --packages-select airlab_pick_place, 일회성 변경은 실행 시 -p 이름:=값
+pick_place_server:
+  ros__parameters:
+    object_body: obj_box_01       # 기본으로 집을 MuJoCo body
+    ee_link: panda_hand_tcp       # 목표 pose 기준 링크 (손가락 사이 중심)
+    approach_height: 0.15         # 큐브 중심 위 접근 높이 (m)
+    grasp_height: 0.0             # 큐브 중심 기준 잡는 높이 (m)
+    lift_height: 0.20             # 들어올리는 높이 (m)
+    open_width: 0.08              # 그리퍼 열림 폭 (m)
+    grasp_width: 0.0              # 닫힘 명령 폭 (m)
+    grasp_effort: 40.0            # 잡는 힘 (N)
+    velocity_scale: 0.3           # Pilz PTP/LIN 속도·가속도 비율
+    stage_pause: 0.3              # 단계 사이 대기 (s)
+    success_tolerance: 0.05       # 목표와 큐브 거리 허용치 (m)
+    grasp_offset_x_min: 0.0       # 잡는 위치 x 오프셋 범위 (m, panda_link0)
+    grasp_offset_x_max: 0.0
+    commanded_rate: 15.0          # 명령 pose 발행 주기 (Hz)
+
+episode_collector:
+  ros__parameters:
+    object_body: obj_box_01
+    marker_body: place_marker     # 놓을 위치 = 이 body의 현재 위치
+    instruction: "Pick up the blue cube and place it on the red marker."
+    output_dir: ~/multipanda_ws/data/episodes
+    num_episodes: 3
+    start_index: 0
+    record_rate: 15.0             # 기록 주기 (Hz)
+    object_reset_z: 0.061         # 큐브를 놓는 높이 (테이블 위 1 cm)
+    # 시작 구역 중심 [x1, y1, x2, y2, ...] (MuJoCo world, m), 에피소드마다 순서대로 사용
+    start_zones: [-0.5, 0.03, -0.5, -0.09, -0.5, -0.21]
+    start_zone_half: 0.02         # 구역 반폭 (m), 구역 안에서 무작위
+    result_timeout: 60.0          # 한 에피소드 최대 대기 (s)
+    stop_on_failure: false

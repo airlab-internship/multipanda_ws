@@ -1,6 +1,8 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
-package_name = 'camera_subscriber_pkg'
+package_name = 'airlab_pick_place'
 
 setup(
     name=package_name,
@@ -10,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -24,7 +28,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'save_images = camera_subscriber_pkg.image_saver_node:main',
+            'pregrasp = airlab_pick_place.pregrasp:main',
+            'pick_place_server = airlab_pick_place.pick_place_server:main',
+            'collect_episodes = airlab_pick_place.collect_episodes:main',
         ],
     },
 )

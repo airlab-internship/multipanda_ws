@@ -1,0 +1,6 @@
+# Pilz LIN 직선 이동 속도 제한 (너무 빠르면 panda_joint2가 관절 제한을 넘음)
+cartesian_limits:
+  max_trans_vel: 0.6
+  max_trans_acc: 1.5
+  max_trans_dec: -1.5
+  max_rot_vel: 1.3

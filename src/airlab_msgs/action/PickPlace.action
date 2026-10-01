@@ -1,0 +1,13 @@
+# Goal
+string object_name        # MuJoCo body to pick (empty -> server parameter object_body)
+float64 place_x           # place target in MuJoCo world frame (m)
+float64 place_y
+---
+# Result
+bool success              # object ended within success_tolerance of the target
+float64 final_distance    # horizontal object-to-target distance (m)
+geometry_msgs/Pose final_object_pose
+string message
+---
+# Feedback
+string stage              # approach | descend | grasp | lift | place | open | retreat
