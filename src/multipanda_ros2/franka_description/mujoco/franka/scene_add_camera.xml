@@ -1,0 +1,29 @@
+<mujoco model="panda scene">
+
+  <include file="panda_with_hand_camera.xml"/>
+  <include file="objects_airlab.xml"/>
+  
+
+  <statistic center="0.3 0 0.4" extent="1"/>
+
+  <visual>
+    <headlight diffuse="0.4 0.4 0.4" ambient="0.2 0.2 0.2" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+    <quality shadowsize="0"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="flat" rgb1="0.5 0.5 0.5" width="512" height="3072"/>
+    <material name="groundplane" rgba="0.5 0.5 0.5 1" reflectance="0"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"
+           diffuse="0.5 0.5 0.5" specular="0.2 0.2 0.2" ambient="0.15 0.15 0.15"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <geom name="table" type="box" pos="-0.5 0 0" size="0.4 0.4 0.02" rgba="0.85 0.85 0.85 1"/>
+    <camera name="test_cam" pos="-0.97 0.798 0.806"
+            xyaxes="-0.833 -0.553 0 0.277 -0.417 0.866" fovy="50"/>
+  </worldbody>
+</mujoco>

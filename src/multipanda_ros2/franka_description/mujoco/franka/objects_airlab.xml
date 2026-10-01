@@ -1,0 +1,19 @@
+<mujocoinclude>
+  <worldbody>
+    <!-- 큐브: free joint가 있어야 /set_body_state로 위치를 옮길 수 있음 -->
+    <body name="obj_box_01" pos="-0.5 -0.13 0.061">
+      <joint name="obj_box_01_joint" type="free" damping="0.0005"/>
+      <geom name="obj_box_01" type="box" size="0.03 0.03 0.03" friction="2 0.005 0.0001"
+            solimp="0.998 0.998 0.001" solref="0.001 1" density="100" rgba="0.1 0.3 0.9 1"/>
+    </body>
+
+    <!-- 마커: 충돌 없음(contype/conaffinity 0), 중력 보상(gravcomp)으로 제자리에 고정 -->
+    <body name="place_marker" pos="-0.5 0.15 0.0205" gravcomp="1">
+      <joint name="place_marker_joint" type="free"/>
+      <geom name="place_marker" type="box" size="0.05 0.05 0.0005" rgba="0.85 0.2 0.15 1"
+            contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- 물체 추가: 위 body 블록을 복사하고 name(body, joint, geom)을 모두 새 이름으로 변경 -->
+  </worldbody>
+</mujocoinclude>
