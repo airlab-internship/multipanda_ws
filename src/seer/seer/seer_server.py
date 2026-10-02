@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-A server script for the Seer model. Run this in the same environment as the model checkpoint.
+A server script for the Seer model. Run this on the GPU server, in Seer's conda env.
+Copy it to the Seer repository root (or pass --seer_root) so `models` and `utils` can be imported.
 
 Usage: python seer_server.py \
         --model_path <checkpoint_path> \
@@ -28,7 +29,6 @@ import argparse
 import functools
 import traceback
 
-from pathlib import Path
 from collections import deque
 from PIL import Image
 
@@ -36,8 +36,8 @@ from PIL import Image
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True)
-    parser.add_argument("--vit_checkpoint_path", Path())
-    parser.add_argument("--seer_root", default=os.path.dirname(os.path.abspath(__file__)))
+    parser.add_argument("--vit_checkpoint_path", required=True)  # mae_pretrain_vit_base.pth (학습 때와 같은 파일)
+    parser.add_argument("--seer_root", default=os.path.dirname(os.path.abspath(__file__)))  # Seer 레포 최상위
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--host", default="127.0.0.1") # loopback only; reached via SSH
     parser.add_argument("--port", type=int, default=5001)
@@ -81,6 +81,8 @@ class Seer:
         max_steps=600,
         bf16_vision_encoder=True,
     ):
+        if not os.path.isfile(os.path.join(seer_root, "models", "seer_model.py")):
+            raise FileNotFoundError(f"Seer repository not found at {seer_root} (pass --seer_root)")
         sys.path.insert(0, seer_root)
         import clip
         from models.seer_model import SeerAgent
@@ -124,9 +126,17 @@ class Seer:
         self.model = self.model.to(self.device)
         self.model._init_model_type()
 
+        # 학습 체크포인트는 DDP라 키가 "module."로 시작하고, 동결된 가중치는 들어 있지 않음 -> strict=False
         ckpt = torch.load(model_path, map_location="cpu")
         sd = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
-        sd = {k.replace("module.", "", 1): v for k, v in sd.items()}
+        sd = {k[len("module."):] if k.startswith("module.") else k: v for k, v in sd.items()}
+        missing, unexpected = self.model.load_state_dict(sd, strict=False)
+        # Seer의 get_checkpoint는 requires_grad=False인 파라미터(CLIP, ViT, 고정 위치 임베딩)를 저장하지 않음 -> 학습되는 것만 확인
+        trainable = {n for n, prm in self.model.named_parameters() if prm.requires_grad}
+        missing = [k for k in missing if k in trainable]
+        if missing or unexpected:
+            print(f"[server] WARNING checkpoint mismatch: missing={missing[:10]} unexpected={unexpected[:10]}")
+        print(f"[server] loaded {len(sd)} tensors from {model_path}")
         self.model.eval()
 
         self.image_fn = functools.partial(preprocess_image, image_processor=self.model.image_processor)

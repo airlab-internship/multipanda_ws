@@ -9,8 +9,10 @@ Approach:
   - Execute the fetched actions.
 
 Usage:
-  - client: ssh -N -L 5001:localhost:5001 user@165.194.27.147
-  - server: python seer_server.py --model_path <your-checkpoint-path> --vit_path <mae_vit_path> --port <port>
+  - server (GPU, Seer 레포 최상위에서): python seer_server.py --model_path <checkpoint> --vit_checkpoint_path <mae_vit> --port 5001
+  - tunnel (시뮬레이터 PC): ssh -N -L 5001:127.0.0.1:5001 <user>@<gpu-server>
+  - client: ros2 run seer seer_node   (sim.launch.py + 카메라가 떠 있어야 함)
+  - 에피소드마다: ros2 service call /seer/reset std_srvs/srv/Trigger  /  ros2 service call /seer/enable std_srvs/srv/SetBool "{data: true}"
 """
 
 import io
@@ -26,6 +28,8 @@ import rclpy.time
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.parameter import Parameter
+from geometry_msgs.msg import Pose
+from std_srvs.srv import SetBool, Trigger
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from cv_bridge import CvBridge
@@ -36,8 +40,11 @@ from scipy.spatial.transform import Rotation as R
 from PIL import Image as PILImage
 from tf2_ros import Buffer, TransformListener
 from franka_msgs.action import Grasp, Move
-from moveit_msgs.srv import GetPositionIK
 from builtin_interfaces.msg import Duration
+from moveit.core.robot_state import RobotState
+from airlab_pick_place.moveit_setup import create_moveit
+
+from .pose import pose6d
  
 OPEN = 1.0
 CLOSE = -1.0
@@ -132,15 +139,18 @@ class SeerNode(Node):
 
         # ======================= Inference Parameters ======================
         self.declare_parameter("control_frequency", 15.0)
-        self.declare_parameter("instruction", "Pick up the blue cube, and place it.")
+        self.declare_parameter("instruction", "Pick up the blue cube and place it on the red marker.")  # 학습 데이터와 같은 문장
+        self.declare_parameter("autostart", True)  # false면 /seer/enable 호출 전까지 로봇을 움직이지 않음
 
         # ======================== Control Parameters =======================
-        self.declare_parameter("gripper_eps", 0.002)
+        self.declare_parameter("open_thresh", 0.07)  # 수집과 동일: 손가락 두 개 폭 합이 이보다 크면 열림
         self.declare_parameter("base_link", "panda_link0")
         self.declare_parameter("hand_link", "panda_hand_tcp")
         self.declare_parameter("ik_group", "panda_arm")
         self.declare_parameter("ik_tip_link", "panda_link8")
-        self.declare_parameter("trajectory_duration", 0.1)
+        self.declare_parameter("ik_timeout", 0.02)
+        self.declare_parameter("max_joint_jump", 0.5)  # rad, 한 스텝에 이보다 크게 바뀌는 IK 해는 버림 (팔 뒤집힘 방지)
+        self.declare_parameter("trajectory_duration", 0.0)  # 0이면 1 / control_frequency
         self.declare_parameter("leash_pos", 0.04) # for preventing sudden movements
         self.declare_parameter("leash_rot", 0.01)
         self.declare_parameter("max_rel_pos", 0.02) # this was used in the official repo for normalization scale
@@ -148,9 +158,8 @@ class SeerNode(Node):
         self.declare_parameter("grasp_force", 50.0)
 
         # ========================  Topic Parameters ========================
-        self.declare_parameter("third_person_image_topic", "/mujoco_server/cameras/third_person_camera/rgb/image_raw")
-        self.declare_parameter("wrist_image_topic", "/mujoco_server/cameras/wrist_camera/rgb/image_raw")
-        self.declare_parameter("gripper_state_topic", "/panda_gripper_sim_node/joint_states")
+        self.declare_parameter("third_person_image_topic", "/mujoco_server/cameras/test_cam/rgb/image_raw")  # 수집과 같은 카메라
+        self.declare_parameter("wrist_image_topic", "/mujoco_server/cameras/hand_cam/rgb/image_raw")
         self.declare_parameter("instruction_topic", "/language_instruction")
         self.declare_parameter("goal_pose_topic", "/panda_arm_controller/joint_trajectory")
         self.declare_parameter("arm_joint_state_topic", "/joint_states")
@@ -161,7 +170,8 @@ class SeerNode(Node):
         p = lambda n: self.get_parameter(n).value  # noqa: E731
 
         # ============================ Variables ============================
-        self.eps = p("gripper_eps")
+        self.open_thresh = p("open_thresh")
+        self.enabled = p("autostart")
         self.model = RemoteModel(host=p("server_host"), port=p("server_port"), timeout=p("server_timeout"), jpeg_quality=p("jpeg_quality"))
         self.bridge = CvBridge()
 
@@ -170,7 +180,13 @@ class SeerNode(Node):
 
         self.tcp_in_tip = None
         self.ik_group = p("ik_group")
-        self.traj_duration = p("trajectory_duration")
+        self.ik_timeout = p("ik_timeout")
+        self.max_joint_jump = p("max_joint_jump")
+        self.traj_duration = p("trajectory_duration") or 1.0 / p("control_frequency")
+
+        # IK는 MoveItPy의 RobotState로 직접 계산 (/compute_ik는 move_group이 있어야 하는데 sim.launch.py에는 없음)
+        self.moveit = create_moveit(node_name="seer_moveit")
+        self.ik_state = RobotState(self.moveit.get_robot_model())
 
         self.base_link = p("base_link")
         self.hand_link = p("hand_link")
@@ -184,7 +200,7 @@ class SeerNode(Node):
 
         self.latest_third_person_image = None
         self.latest_wrist_image = None
-        self.latest_joint_states = None
+        self.joints = {}  # /joint_states는 팔·그리퍼가 따로 들어오므로 이름별로 최신값 유지 (Recorder와 동일)
         self.latest_gripper_state = None
         self.last_target_pose = None
         self.last_gripper_cmd = None
@@ -197,18 +213,18 @@ class SeerNode(Node):
 
         self.create_subscription(Image, p("third_person_image_topic"), self.on_third_person_image, depth, callback_group=sensor_cb)
         self.create_subscription(Image, p("wrist_image_topic"), self.on_wrist_image, depth, callback_group=sensor_cb)
-        self.create_subscription(JointState, p("arm_joint_state_topic"), self.on_arm_joint_states, depth, callback_group=sensor_cb)
-        self.create_subscription(JointState, p("gripper_state_topic"), self.on_gripper_state, depth, callback_group=sensor_cb)
+        self.create_subscription(JointState, p("arm_joint_state_topic"), self.on_joint_states, depth, callback_group=sensor_cb)
         self.create_subscription(String, p("instruction_topic"), self.on_instruction, 1, callback_group=sensor_cb)
  
         self.goal_pub = self.create_publisher(JointTrajectory, p("goal_pose_topic"), 1)
 
-        self.ik_client = self.create_client(GetPositionIK, "/compute_ik", callback_group=sensor_cb)
+        self.create_service(Trigger, "~/reset", self.on_reset, callback_group=control_cb)
+        self.create_service(SetBool, "~/enable", self.on_enable, callback_group=control_cb)
         self.move_client = ActionClient(self, Move, f"{p('gripper_topic_ns')}/move", callback_group=sensor_cb)
         self.grasp_client = ActionClient(self, Grasp, f"{p('gripper_topic_ns')}/grasp", callback_group=sensor_cb)
  
         self.create_timer(1.0 / p("control_frequency"), self.control_step, callback_group=control_cb)
-        self.logger.info("Seer node started.")
+        self.logger.info(f"Seer node started ({'running' if self.enabled else 'paused, call ~/enable'}).")
 
     
     # ======================== Callbacks ========================
@@ -224,27 +240,45 @@ class SeerNode(Node):
         self.latest_wrist_image = msg
 
 
-    def on_arm_joint_states(self, msg):
-        self.latest_joint_states = msg
-
-
-    def on_gripper_state(self, msg):
-        # NOTE: maybe utilize the object width to compute the threshold?
-        if len(msg.position) == 0: 
-            self.logger.info("Unable to fetch gripper position.")
-            return
-        self.latest_gripper_state = OPEN if msg.position[0] > 0.04 - self.eps else CLOSE
+    def on_joint_states(self, msg):
+        self.joints.update(zip(msg.name, msg.position))
+        if "panda_finger_joint1" in self.joints and "panda_finger_joint2" in self.joints:
+            # 수집과 같은 기준: 두 손가락 폭의 합 > open_thresh 이면 열림
+            width = self.joints["panda_finger_joint1"] + self.joints["panda_finger_joint2"]
+            self.latest_gripper_state = OPEN if width > self.open_thresh else CLOSE
 
 
     def on_instruction(self, msg):
         if msg.data != self.instruction:
             self.logger.info(f"New instruction: '{msg.data}' received. Resetting history...")
             self.instruction = msg.data
-            self.model.reset()
-            self.last_target_pose = None
-            self.last_gripper_cmd = None
-            # self.reset_episode_state()
-            self.logger.info("Episode state reset, policy is running.")
+            self.reset_episode()
+
+
+    def reset_episode(self):
+        """정책 history(서버)와 목표 pose 누적을 초기화. 새 에피소드 시작 전에 호출."""
+        self.model.reset()
+        self.last_target_pose = None
+        self.last_gripper_cmd = None
+        self.logger.info("Episode state reset.")
+
+
+    def on_reset(self, request, response):
+        try:
+            self.reset_episode()
+            response.success, response.message = True, "reset"
+        except Exception as e:
+            response.success, response.message = False, str(e)
+        return response
+
+
+    def on_enable(self, request, response):
+        if request.data and not self.enabled:
+            self.reset_episode()  # 이전 에피소드의 history로 이어서 움직이지 않도록
+        self.enabled = request.data
+        response.success, response.message = True, "enabled" if self.enabled else "paused"
+        self.logger.info(f"Policy {response.message}.")
+        return response
 
 
     # ======================== Solving IK =======================
@@ -275,30 +309,21 @@ class SeerNode(Node):
 
     def solve_ik(self, pos, rot):
         """
-        Returns 7 joint angles, or None if IK fails.
+        Returns 7 joint angles, or None if IK fails or the solution jumps too far from the current joints.
         """
-        if not self.ik_client.service_is_ready(): 
-            self.logger.warn("IK service not ready.", throttle_duration_sec=2.0)
+        seed = [self.joints.get(j) for j in ARM_JOINTS]
+        if None in seed:
             return None
-        req = GetPositionIK.Request()
-        ik = req.ik_request
-        ik.group_name = self.ik_group
-        ik.robot_state.joint_state = self.latest_joint_states   # seed = current joints (avoids elbow flips)
-        ik.avoid_collisions = False
-        ik.timeout.nanosec = 20_000_000                          # 20 ms
-
-        ik.pose_stamped.header.frame_id = self.base_link
-        ik.pose_stamped.pose.position.x, ik.pose_stamped.pose.position.y, ik.pose_stamped.pose.position.z = map(float, pos)
-        qx, qy, qz, qw = rot.as_quat()
-        o = ik.pose_stamped.pose.orientation
-        o.x, o.y, o.z, o.w = float(qx), float(qy), float(qz), float(qw)
-
-        res = self.ik_client.call(req)
-        if res.error_code.val != 1:   # 1 = SUCCESS
+        self.ik_state.set_joint_group_positions(self.ik_group, seed)  # seed = current joints (avoids elbow flips)
+        pose = Pose()
+        pose.position.x, pose.position.y, pose.position.z = map(float, pos)
+        pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w = map(float, rot.as_quat())
+        if not self.ik_state.set_from_ik(self.ik_group, pose, self.ik_tip_link, self.ik_timeout):
             return None
-        js = res.solution.joint_state
-        idx = {n: i for i, n in enumerate(js.name)}
-        return [js.position[idx[j]] for j in ARM_JOINTS]
+        q = np.asarray(self.ik_state.get_joint_group_positions(self.ik_group), dtype=np.float64)
+        if np.abs(q - np.asarray(seed)).max() > self.max_joint_jump:
+            return None
+        return q.tolist()
 
     
     # ===================== Commanding Panda ====================
@@ -349,6 +374,8 @@ class SeerNode(Node):
 
 
     def control_step(self):
+        if not self.enabled:
+            return
         ee_pose = self.get_ee_pose()
         if ee_pose is None:
             self.logger.error("Unable to fetch the end-effector pose. Aborting...")
@@ -357,7 +384,7 @@ class SeerNode(Node):
         if self.last_target_pose is None: # first step of an episode
             self.last_target_pose = ee_pose
 
-        if None in (self.latest_third_person_image, self.latest_wrist_image, self.latest_gripper_state, self.latest_joint_states):
+        if None in (self.latest_third_person_image, self.latest_wrist_image, self.latest_gripper_state) or not self.joints:
             self.logger.info("Unable to run control step yet.", throttle_duration_sec=2.0)
             return
         
@@ -369,7 +396,7 @@ class SeerNode(Node):
         except Exception as e:
             self.logger.error(f"Error occurred while running inference: {e}", throttle_duration_sec=2.0)
             return
-        if self.last_target_pose is None: 
+        if not self.enabled or self.last_target_pose is None:
             self.logger.info("Instruction has been changed during prediction. Resetting policy...", throttle_duration_sec=2.0)
             return
         target_pose, target_gripper_state = self.decode_action(delta_action, self.last_target_pose)
@@ -384,7 +411,7 @@ class SeerNode(Node):
         if self.get_tcp_in_tip() is not None:
             q = self.solve_ik(*self.tcp_to_tip(target_pose))
             if q is None:
-                self.logger.warn("IK failed; holding previous goal.", throttle_duration_sec=1.0)
+                self.logger.warn("IK failed or jumped; holding previous goal.", throttle_duration_sec=1.0)
             else:
                 traj = JointTrajectory()
                 traj.joint_names = ARM_JOINTS
@@ -435,10 +462,8 @@ class SeerNode(Node):
             return None
         
         t, q = tf.transform.translation, tf.transform.rotation
-        pos = np.array([t.x, t.y, t.z], dtype=np.float64)
-        rot = R.from_quat([q.x, q.y, q.z, q.w]).as_euler("xyz")
-
-        return np.concatenate([pos, rot], dtype=np.float64)
+        # 학습 데이터(gripper_pose)와 같은 규약: rx를 [0, 2π)로 (seer/pose.py)
+        return pose6d([t.x, t.y, t.z], [q.x, q.y, q.z, q.w])
 
 
     def to_rgb(self, msg):
@@ -447,10 +472,11 @@ class SeerNode(Node):
     
 
     def destroy_node(self):
-            try:
-                self.model.close()
-            finally:
-                super().destroy_node()
+        try:
+            self.model.close()
+            self.moveit.shutdown()
+        finally:
+            super().destroy_node()
 
 
 def main():
