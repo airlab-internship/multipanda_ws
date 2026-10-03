@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 튜토리얼 2장(컨테이너 구성)을 한 번에 실행: 베이스 이미지 → 실습 이미지 → 컨테이너 → colcon build
 # Docker 설치(1장)는 먼저 끝내고, 로그아웃/로그인해서 docker 그룹이 적용된 상태여야 함.
-set -e
+set -eo pipefail
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! docker info > /dev/null 2>&1; then
@@ -21,8 +21,22 @@ if ! docker image inspect build-env:multipanda_ros2-amd64 > /dev/null 2>&1; then
     done
 fi
 
-# 2.2 (3) 실습 이미지
-docker build -t airlab-sim:humble "$WS/docker"
+# 2.2 (3) 실습 이미지: 통신 패키지만 포함 (데이터·모델·학습 환경은 제외)
+tar -C "$WS" --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' \
+    -cf - docker/Dockerfile src/openpi/packages/openpi-client \
+    | docker build -f docker/Dockerfile -t airlab-sim:humble -
+
+# 기존 컨테이너는 이미지 재빌드만으로 업데이트되지 않는다. 임의 삭제하지 않는다.
+if docker container inspect airlab-sim > /dev/null 2>&1; then
+    BUILT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' airlab-sim:humble)"
+    CONTAINER_IMAGE_ID="$(docker container inspect --format '{{.Image}}' airlab-sim)"
+    if [ "$BUILT_IMAGE_ID" != "$CONTAINER_IMAGE_ID" ]; then
+        echo "이미지 빌드 완료. 기존 airlab-sim 컨테이너는 이전 이미지를 사용 중입니다."
+        echo "기존 컨테이너를 중지하고 다른 이름으로 보관한 뒤 ./setup.sh를 다시 실행하세요."
+        echo "워크스페이스는 호스트에 그대로 있으며, 기존 컨테이너는 삭제하지 않았습니다."
+        exit 1
+    fi
+fi
 
 # 2.3 + 2.4 컨테이너 실행 후 워크스페이스 빌드
 "$WS/run.sh" colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release

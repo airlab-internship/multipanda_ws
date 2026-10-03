@@ -1,7 +1,30 @@
+# ROS build outputs
 build/
 install/
 log/
+
+# Datasets and workspace dataset archives
 data/
+/data*.tar
+/data*.tar.gz
+/data*.tgz
+/data*.zip
+
+# Local Python environments and caches
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Local editor settings
+.vscode/
+.idea/
 .DS_Store
+
+# Local credentials (keep distributable example files)
+.env
+.env.*
+!.env.example

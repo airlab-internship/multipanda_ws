@@ -1,0 +1,7 @@
+# 추론 전용 기본값. 실행 시 --ros-args -p 이름:=값 으로 덮어쓸 수 있다.
+# 주기·작업 문장·그리퍼 폭/힘은 기존 pick_place.yaml에서 읽는다.
+panda_openpi_client:
+  ros__parameters:
+    server_ip: "127.0.0.1"      # GPU 서버 주소
+    server_port: 8152
+    open_loop_horizon: 12      # 새 관측으로 추론하기 전에 실행할 action 수

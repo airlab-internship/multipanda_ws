@@ -31,6 +31,7 @@ setup(
             'pregrasp = airlab_pick_place.pregrasp:main',
             'pick_place_server = airlab_pick_place.pick_place_server:main',
             'collect_episodes = airlab_pick_place.collect_episodes:main',
+            'pi05_client = airlab_pick_place.pi05_client:main',
         ],
     },
 )
