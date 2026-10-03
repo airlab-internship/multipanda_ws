@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 import tyro
 
-MIN_IDLE_LEN = 7        # 1 sec @ 15Hz
-MIN_NON_IDLE_LEN = 16
-FILTER_LAST_N = 10      # pi0.5 horizon
-VELOCITY_EPS = 0
-GRIPPER_EVENT_WINDOW = 15  # ±1 sec @ 15Hz
+MIN_IDLE_LEN = 7          # 약 0.47초 @ 15Hz
+MIN_NON_IDLE_LEN = 16     # 약 1.07초 @ 15Hz
+FILTER_LAST_N = 10        # 남은 각 구간 끝에서 제외할 프레임 수
+VELOCITY_EPS = 1e-3       # 관절 속도 절댓값 기준 0.001 rad/s
+GRIPPER_EVENT_WINDOW = 15 # 그리퍼 전환 전후 약 1초 보호
 
 
 @dataclass
